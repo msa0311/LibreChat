@@ -89,13 +89,10 @@ export interface AdminGroupsDeps {
   /** Read before a delete so removed config and ACL entries can be restored if it fails. */
   findConfig: (
     principalType: PrincipalType,
-    principalId: string | Types.ObjectId,
+    principalId: string,
     options?: { includeInactive?: boolean },
   ) => Promise<IConfig | null>;
-  findAclEntries: (
-    principalType: PrincipalType,
-    principalId: string | Types.ObjectId,
-  ) => Promise<IAclEntry[]>;
+  findAclEntries: (principalType: PrincipalType, principalId: string) => Promise<IAclEntry[]>;
   restoreConfig: (snapshot: IConfig) => Promise<void>;
   restoreAclEntries: (entries: IAclEntry[]) => Promise<void>;
   /** Optional audit emission for group mutations; fail-open unless `auditFailClosed`. */
@@ -370,13 +367,19 @@ export function createAdminGroupsHandlers(deps: AdminGroupsDeps): {
       const principalId = new Types.ObjectId(id);
       const [configSnapshot, aclSnapshot] = await Promise.all([
         findConfig(PrincipalType.GROUP, id, { includeInactive: true }),
-        findAclEntries(PrincipalType.GROUP, principalId),
+        findAclEntries(PrincipalType.GROUP, id),
       ]);
-      /** Best effort: a failed restore is logged and the original failure still surfaces. */
+      /** Only steps that started are restored. Best effort: a failed restore is logged and the original failure still surfaces. */
+      let configRemoval = false;
+      let aclRemoval = false;
       const restoreCleanup = async () => {
         const restores: Array<[string, () => Promise<void>]> = [];
-        if (configSnapshot) restores.push(['config', () => restoreConfig(configSnapshot)]);
-        if (aclSnapshot.length > 0) restores.push(['acl', () => restoreAclEntries(aclSnapshot)]);
+        if (configRemoval && configSnapshot) {
+          restores.push(['config', () => restoreConfig(configSnapshot)]);
+        }
+        if (aclRemoval && aclSnapshot.length > 0) {
+          restores.push(['acl', () => restoreAclEntries(aclSnapshot)]);
+        }
         const results = await Promise.allSettled(restores.map(([, restore]) => restore()));
         results.forEach((result, index) => {
           if (result.status === 'rejected') {
@@ -400,7 +403,9 @@ export function createAdminGroupsHandlers(deps: AdminGroupsDeps): {
         });
       };
       try {
+        configRemoval = true;
         await deleteConfig(PrincipalType.GROUP, id);
+        aclRemoval = true;
         await deleteAclEntries({ principalType: PrincipalType.GROUP, principalId });
       } catch (cleanupError) {
         return await cleanupFailed(cleanupError);

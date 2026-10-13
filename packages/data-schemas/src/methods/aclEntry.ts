@@ -622,9 +622,9 @@ export function createAclEntryMethods(mongoose: typeof import('mongoose')): {
       await AclEntry.insertMany(missing, { ordered: false });
     } catch (error) {
       const writeErrors = (error as { writeErrors?: Array<{ code?: number }> }).writeErrors;
-      const duplicatesOnly =
-        (error as { code?: number }).code === 11000 ||
-        (Array.isArray(writeErrors) && writeErrors.every((e) => e.code === 11000));
+      const duplicatesOnly = Array.isArray(writeErrors)
+        ? writeErrors.length > 0 && writeErrors.every((e) => e.code === 11000)
+        : (error as { code?: number }).code === 11000;
       if (!duplicatesOnly) {
         throw error;
       }
