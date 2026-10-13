@@ -375,6 +375,7 @@ export function createAdminGroupsHandlers(deps: AdminGroupsDeps): {
       const restoreCleanup = async () => {
         /** A concurrent request may have deleted the group already; its dependents stay gone. */
         if (!(await findGroupById(id))) {
+          logger.warn('[adminGroups] group already deleted; cleanup not restored', { groupId: id });
           return;
         }
         const restores: Array<[string, () => Promise<void>]> = [];
