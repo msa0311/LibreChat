@@ -373,6 +373,10 @@ export function createAdminGroupsHandlers(deps: AdminGroupsDeps): {
       let configRemoval = false;
       let aclRemoval = false;
       const restoreCleanup = async () => {
+        /** A concurrent request may have deleted the group already; its dependents stay gone. */
+        if (!(await findGroupById(id))) {
+          return;
+        }
         const restores: Array<[string, () => Promise<void>]> = [];
         if (configRemoval && configSnapshot) {
           restores.push(['config', () => restoreConfig(configSnapshot)]);

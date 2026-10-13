@@ -854,6 +854,23 @@ describe('createAdminGroupsHandlers', () => {
       expect(deps.restoreAclEntries).toHaveBeenCalledWith(aclSnapshot);
     });
 
+    it('does not restore dependents of a group another request already deleted', async () => {
+      const deps = createDeps({
+        findGroupById: jest.fn().mockResolvedValueOnce(mockGroup()).mockResolvedValue(null),
+        findConfig: jest.fn().mockResolvedValue(configSnapshot),
+        findAclEntries: jest.fn().mockResolvedValue(aclSnapshot),
+        deleteGroup: jest.fn().mockRejectedValue(new Error('db down')),
+      });
+      const handlers = createAdminGroupsHandlers(deps);
+      const { req, res, status } = createReqRes({ params: { id: validId } });
+
+      await handlers.deleteGroup(req, res);
+
+      expect(status).toHaveBeenCalledWith(500);
+      expect(deps.restoreConfig).not.toHaveBeenCalled();
+      expect(deps.restoreAclEntries).not.toHaveBeenCalled();
+    });
+
     it('still answers GROUP_CLEANUP_FAILED when a restore fails', async () => {
       const deps = createDeps({
         findGroupById: jest.fn().mockResolvedValue(mockGroup()),
