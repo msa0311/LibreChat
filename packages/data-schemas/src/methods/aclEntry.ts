@@ -194,6 +194,8 @@ export function createAclEntryMethods(mongoose: typeof import('mongoose')): {
     resourceIds?: Types.ObjectId[],
     readPrimary?: boolean,
   ) => Promise<Types.ObjectId[]>;
+  /** Re-inserts ACL entries removed earlier; entries that exist again are skipped. */
+  restoreAclEntries: (entries: IAclEntry[]) => Promise<void>;
   deleteAclEntries: (
     filter: Record<string, unknown>,
     options?: { session?: ClientSession },
@@ -598,6 +600,37 @@ export function createAclEntryMethods(mongoose: typeof import('mongoose')): {
     return AclEntry.deleteMany(filter, options || {});
   }
 
+  async function restoreAclEntries(entries: IAclEntry[]): Promise<void> {
+    if (entries.length === 0) {
+      return;
+    }
+    const AclEntry = mongoose.models.AclEntry as Model<IAclEntry>;
+    const key = (
+      e: Pick<IAclEntry, 'principalType' | 'principalId' | 'resourceType' | 'resourceId'>,
+    ) => [e.principalType, e.principalId, e.resourceType, e.resourceId].map(String).join(':');
+    const existing = await AclEntry.find({
+      $or: entries.map((e) => ({ principalType: e.principalType, principalId: e.principalId })),
+    })
+      .select('principalType principalId resourceType resourceId')
+      .lean<IAclEntry[]>();
+    const present = new Set(existing.map(key));
+    const missing = entries.filter((e) => !present.has(key(e)));
+    if (missing.length === 0) {
+      return;
+    }
+    try {
+      await AclEntry.insertMany(missing, { ordered: false });
+    } catch (error) {
+      const writeErrors = (error as { writeErrors?: Array<{ code?: number }> }).writeErrors;
+      const duplicatesOnly =
+        (error as { code?: number }).code === 11000 ||
+        (Array.isArray(writeErrors) && writeErrors.every((e) => e.code === 11000));
+      if (!duplicatesOnly) {
+        throw error;
+      }
+    }
+  }
+
   /** Reject values JavaScript bit operations would truncate. Missing legacy fields mean zero. */
   function permissionMask(value: unknown): number {
     if (value === undefined) return 0;
@@ -886,6 +919,7 @@ export function createAclEntryMethods(mongoose: typeof import('mongoose')): {
     revokePermission,
     modifyPermissionBits,
     findAccessibleResources,
+    restoreAclEntries,
     deleteAclEntries,
     replaceRoleBits,
     bulkWriteAclEntries,

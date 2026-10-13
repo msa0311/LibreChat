@@ -24,6 +24,10 @@ const handlers = createAdminGroupsHandlers({
   findUsers: db.findUsers,
   deleteConfig: db.deleteConfig,
   deleteAclEntries: db.deleteAclEntries,
+  findConfig: db.findConfigByPrincipal,
+  findAclEntries: db.findEntriesByPrincipal,
+  restoreConfig: db.restoreConfig,
+  restoreAclEntries: db.restoreAclEntries,
   recordAuditEntry: db.recordAuditEntry,
 });
 

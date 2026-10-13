@@ -461,6 +461,48 @@ describe('deleteConfig', () => {
   });
 });
 
+describe('restoreConfig', () => {
+  it('brings back a deleted config with its overrides, priority and tombstones', async () => {
+    await methods.upsertConfig(
+      PrincipalType.GROUP,
+      'g1',
+      PrincipalModel.GROUP,
+      { cache: false },
+      7,
+    );
+    await methods.tombstoneConfigField(PrincipalType.GROUP, 'g1', PrincipalModel.GROUP, 'a.b', 7);
+    const snapshot = await methods.findConfigByPrincipal(PrincipalType.GROUP, 'g1', {
+      includeInactive: true,
+    });
+    await methods.deleteConfig(PrincipalType.GROUP, 'g1');
+    expect(await methods.findConfigByPrincipal(PrincipalType.GROUP, 'g1')).toBeNull();
+
+    await methods.restoreConfig(snapshot!);
+
+    const restored = await methods.findConfigByPrincipal(PrincipalType.GROUP, 'g1');
+    expect(restored?.priority).toBe(7);
+    expect(restored?.overrides).toEqual({ cache: false });
+    expect(restored?.tombstones).toEqual(snapshot?.tombstones);
+  });
+
+  it('leaves a config that exists again untouched', async () => {
+    await methods.upsertConfig(
+      PrincipalType.GROUP,
+      'g1',
+      PrincipalModel.GROUP,
+      { cache: false },
+      7,
+    );
+    const snapshot = await methods.findConfigByPrincipal(PrincipalType.GROUP, 'g1');
+    await methods.upsertConfig(PrincipalType.GROUP, 'g1', PrincipalModel.GROUP, { cache: true }, 9);
+
+    await methods.restoreConfig(snapshot!);
+
+    const current = await methods.findConfigByPrincipal(PrincipalType.GROUP, 'g1');
+    expect(current?.overrides).toEqual({ cache: true });
+  });
+});
+
 describe('toggleConfigActive', () => {
   it('deactivates an active config', async () => {
     await methods.upsertConfig(PrincipalType.ROLE, 'admin', PrincipalModel.ROLE, {}, 10);

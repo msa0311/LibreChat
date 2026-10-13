@@ -62,6 +62,8 @@ export function createConfigMethods(mongoose: typeof import('mongoose')): {
     fieldPath: string,
     session?: ClientSession,
   ) => Promise<IConfig | null>;
+  /** Re-inserts a config removed earlier; a document that exists again is left untouched. */
+  restoreConfig: (snapshot: IConfig) => Promise<void>;
   deleteConfig: (
     principalType: PrincipalType,
     principalId: string | Types.ObjectId,
@@ -345,7 +347,23 @@ export function createConfigMethods(mongoose: typeof import('mongoose')): {
     );
   }
 
+  async function restoreConfig(snapshot: IConfig): Promise<void> {
+    const Config = mongoose.models.Config as Model<IConfig>;
+    const { principalType, principalId, createdAt, updatedAt, ...fields } = snapshot as IConfig & {
+      createdAt?: Date;
+      updatedAt?: Date;
+    };
+    void createdAt;
+    void updatedAt;
+    await Config.updateOne(
+      { principalType, principalId },
+      { $setOnInsert: { principalType, principalId, ...fields } },
+      { upsert: true },
+    );
+  }
+
   return {
+    restoreConfig,
     listAllConfigs,
     findConfigByPrincipal,
     getApplicableConfigs,

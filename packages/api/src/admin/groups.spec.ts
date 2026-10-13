@@ -1,6 +1,6 @@
 import { Types } from 'mongoose';
 import { PrincipalType } from 'librechat-data-provider';
-import type { IGroup, IUser } from '@librechat/data-schemas';
+import type { IGroup, IUser, IConfig, IAclEntry } from '@librechat/data-schemas';
 import type { Response } from 'express';
 import type { ServerRequest } from '~/types/http';
 import type { AdminGroupsDeps } from './groups';
@@ -76,6 +76,10 @@ describe('createAdminGroupsHandlers', () => {
       findUsers: jest.fn().mockResolvedValue([]),
       deleteConfig: jest.fn().mockResolvedValue(null),
       deleteAclEntries: jest.fn().mockResolvedValue({ deletedCount: 0 }),
+      findConfig: jest.fn().mockResolvedValue(null),
+      findAclEntries: jest.fn().mockResolvedValue([]),
+      restoreConfig: jest.fn().mockResolvedValue(undefined),
+      restoreAclEntries: jest.fn().mockResolvedValue(undefined),
       ...overrides,
     };
   }
@@ -793,7 +797,7 @@ describe('createAdminGroupsHandlers', () => {
       await handlers.deleteGroup(req, res);
 
       expect(status).toHaveBeenCalledWith(500);
-      expect(json).toHaveBeenCalledWith({ error: 'Failed to delete group' });
+      expect(json).toHaveBeenCalledWith(expect.objectContaining({ code: 'GROUP_CLEANUP_FAILED' }));
     });
 
     it('returns 500 and keeps the group when cascade cleanup fails', async () => {
@@ -809,6 +813,60 @@ describe('createAdminGroupsHandlers', () => {
       expect(status).toHaveBeenCalledWith(500);
       expect(json).toHaveBeenCalledWith(expect.objectContaining({ code: 'GROUP_CLEANUP_FAILED' }));
       expect(deps.deleteGroup).not.toHaveBeenCalled();
+    });
+
+    const configSnapshot = { principalType: 'group', principalId: 'p', overrides: {} } as IConfig;
+    const aclSnapshot = [{ principalType: 'group', resourceType: 'agent' }] as IAclEntry[];
+
+    it('restores the config when the ACL removal fails after it', async () => {
+      const deps = createDeps({
+        findGroupById: jest.fn().mockResolvedValue(mockGroup()),
+        findConfig: jest.fn().mockResolvedValue(configSnapshot),
+        findAclEntries: jest.fn().mockResolvedValue(aclSnapshot),
+        deleteAclEntries: jest.fn().mockRejectedValue(new Error('acl down')),
+      });
+      const handlers = createAdminGroupsHandlers(deps);
+      const { req, res, status, json } = createReqRes({ params: { id: validId } });
+
+      await handlers.deleteGroup(req, res);
+
+      expect(status).toHaveBeenCalledWith(500);
+      expect(json).toHaveBeenCalledWith(expect.objectContaining({ code: 'GROUP_CLEANUP_FAILED' }));
+      expect(deps.restoreConfig).toHaveBeenCalledWith(configSnapshot);
+      expect(deps.deleteGroup).not.toHaveBeenCalled();
+    });
+
+    it('restores the config and ACL entries when the group delete fails', async () => {
+      const deps = createDeps({
+        findGroupById: jest.fn().mockResolvedValue(mockGroup()),
+        findConfig: jest.fn().mockResolvedValue(configSnapshot),
+        findAclEntries: jest.fn().mockResolvedValue(aclSnapshot),
+        deleteGroup: jest.fn().mockRejectedValue(new Error('db down')),
+      });
+      const handlers = createAdminGroupsHandlers(deps);
+      const { req, res, status, json } = createReqRes({ params: { id: validId } });
+
+      await handlers.deleteGroup(req, res);
+
+      expect(status).toHaveBeenCalledWith(500);
+      expect(json).toHaveBeenCalledWith(expect.objectContaining({ code: 'GROUP_CLEANUP_FAILED' }));
+      expect(deps.restoreConfig).toHaveBeenCalledWith(configSnapshot);
+      expect(deps.restoreAclEntries).toHaveBeenCalledWith(aclSnapshot);
+    });
+
+    it('still answers GROUP_CLEANUP_FAILED when a restore fails', async () => {
+      const deps = createDeps({
+        findGroupById: jest.fn().mockResolvedValue(mockGroup()),
+        findConfig: jest.fn().mockResolvedValue(configSnapshot),
+        deleteAclEntries: jest.fn().mockRejectedValue(new Error('acl down')),
+        restoreConfig: jest.fn().mockRejectedValue(new Error('restore down')),
+      });
+      const handlers = createAdminGroupsHandlers(deps);
+      const { req, res, status } = createReqRes({ params: { id: validId } });
+
+      await handlers.deleteGroup(req, res);
+
+      expect(status).toHaveBeenCalledWith(500);
     });
 
     it('leaves ACL entries untouched when the config removal fails', async () => {

@@ -2133,4 +2133,45 @@ describe('AclEntry Model Tests', () => {
       ).rejects.toThrow(mongoose.Error.ValidationError);
     });
   });
+
+  describe('restoreAclEntries', () => {
+    test('brings back removed entries and skips ones that exist again', async () => {
+      const other = new mongoose.Types.ObjectId();
+      await methods.grantPermission(
+        PrincipalType.GROUP,
+        groupId,
+        ResourceType.AGENT,
+        resourceId,
+        PermissionBits.VIEW,
+        grantedById,
+      );
+      await methods.grantPermission(
+        PrincipalType.GROUP,
+        groupId,
+        ResourceType.AGENT,
+        other,
+        PermissionBits.EDIT,
+        grantedById,
+      );
+      const snapshot = await methods.findEntriesByPrincipal(PrincipalType.GROUP, groupId);
+      expect(snapshot).toHaveLength(2);
+      await methods.deleteAclEntries({ principalType: PrincipalType.GROUP, principalId: groupId });
+      await methods.grantPermission(
+        PrincipalType.GROUP,
+        groupId,
+        ResourceType.AGENT,
+        resourceId,
+        PermissionBits.VIEW,
+        grantedById,
+      );
+
+      await methods.restoreAclEntries(snapshot);
+
+      const restored = await methods.findEntriesByPrincipal(PrincipalType.GROUP, groupId);
+      expect(restored).toHaveLength(2);
+      expect(restored.find((e) => e.resourceId.toString() === other.toString())?.permBits).toBe(
+        PermissionBits.EDIT,
+      );
+    });
+  });
 });
